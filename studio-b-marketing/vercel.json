@@ -1,8 +1,27 @@
 {
   "rewrites": [
     {
+      "source": "/app",
+      "destination": "https://studio-b-marketing-app.vercel.app/app"
+    },
+    {
+      "source": "/app/:path*",
+      "destination": "https://studio-b-marketing-app.vercel.app/app/:path*"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/app/:path*",
+      "headers": [
+        {
+          "key": "x-vercel-enable-rewrite-caching",
+          "value": "0"
+        }
+      ]
     }
   ]
 }
