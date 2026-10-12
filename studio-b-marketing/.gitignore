@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Exportações locais de migração podem conter dados de clientes e nunca devem ir ao Git.
+firestore-export*.json
