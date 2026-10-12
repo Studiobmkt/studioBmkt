@@ -18,8 +18,27 @@ sql += statement(`
   alter table public.services add column if not exists highlights jsonb not null default '[]'::jsonb;
   alter table public.services add column if not exists is_dark boolean not null default false;
   alter table public.services add column if not exists icon_name text;
+  alter table public.services add column if not exists status text;
   alter table public.posts add column if not exists description text;
+  alter table public.posts add column if not exists excerpt text;
+  alter table public.posts add column if not exists content text;
+  alter table public.posts add column if not exists slug text;
   alter table public.posts add column if not exists tags text[] not null default '{}';
+  alter table public.posts add column if not exists published boolean not null default false;
+  alter table public.posts add column if not exists published_at timestamptz;
+  alter table public.posts add column if not exists meta_title text;
+  alter table public.posts add column if not exists meta_description text;
+  alter table public.posts add column if not exists image_url text;
+  alter table public.proposals add column if not exists name text;
+  alter table public.proposals add column if not exists company text;
+  alter table public.proposals add column if not exists email text;
+  alter table public.proposals add column if not exists phone text;
+  alter table public.proposals add column if not exists whatsapp text;
+  alter table public.proposals add column if not exists segment text;
+  alter table public.proposals add column if not exists services text[] not null default '{}';
+  alter table public.proposals add column if not exists message text;
+  alter table public.proposals add column if not exists source text;
+  alter table public.proposals add column if not exists status text;
   create table if not exists public.legacy_users (
     firebase_id text primary key,
     firebase_uid text,
