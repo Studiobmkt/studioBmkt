@@ -182,6 +182,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ onOpenModal }) => {
               alt={project.title}
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
+              onError={(event) => { event.currentTarget.style.display = 'none'; }}
             />
           </div>
         </section>
@@ -261,6 +262,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ onOpenModal }) => {
                         alt={`Galeria ${idx + 1}`}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         referrerPolicy="no-referrer"
+                        onError={(event) => { event.currentTarget.style.display = 'none'; }}
                       />
                       <div className="absolute inset-0 bg-[#43210D]/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[#FFC400]">
                         <span className="text-xs font-extrabold font-sans uppercase tracking-wider bg-[#43210D] px-3 py-1.5 rounded-full border border-[#FFC400]">

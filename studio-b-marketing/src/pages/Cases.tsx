@@ -203,6 +203,7 @@ export const Cases: React.FC<CasesProps> = ({ onOpenModal }) => {
                             alt={project.title} 
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 opacity-90 group-hover:opacity-100"
                             referrerPolicy="no-referrer"
+                            onError={(event) => { event.currentTarget.style.display = 'none'; }}
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-[#FFC400]/40 font-heading font-extrabold text-sm">

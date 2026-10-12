@@ -27,6 +27,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { deleteProjectImage, uploadProjectImage, validateProjectImage } from '../lib/projectImageStorage';
 import { sendCustomAuthEmail } from '../lib/emailClient';
 import ThemeToggle from '../components/ThemeToggle';
 import { DEFAULT_MODULES } from '../components/ServicesBento';
@@ -2524,6 +2525,8 @@ const ProjectsManager = () => {
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [coverUploadProgress, setCoverUploadProgress] = useState<number | null>(null);
+  const [galleryUploadProgress, setGalleryUploadProgress] = useState<Record<string, number>>({});
   const [statusFilter, setStatusFilter] = useState<'Todos' | 'Publicado' | 'Rascunho'>('Todos');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -2556,7 +2559,10 @@ const ProjectsManager = () => {
       category: 'BRANDING',
       segment: '',
       imageUrl: '',
-      galleryText: '',
+      imageStoragePath: '',
+      gallery: [],
+      galleryStoragePaths: [],
+      storageKey: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       shortDescription: '',
       fullDescription: '',
       challenge: '',
@@ -2581,7 +2587,10 @@ const ProjectsManager = () => {
       category: proj.category || 'BRANDING',
       segment: proj.segment || '',
       imageUrl: proj.imageUrl || '',
-      galleryText: Array.isArray(proj.gallery) ? proj.gallery.join('\n') : (proj.gallery || ''),
+      imageStoragePath: proj.imageStoragePath || '',
+      gallery: Array.isArray(proj.gallery) ? proj.gallery.filter(Boolean) : (proj.gallery ? [proj.gallery] : []),
+      galleryStoragePaths: Array.isArray(proj.galleryStoragePaths) ? proj.galleryStoragePaths : [],
+      storageKey: proj.storageKey || proj.id,
       shortDescription: proj.shortDescription || proj.description || '',
       fullDescription: proj.fullDescription || '',
       challenge: proj.challenge || '',
@@ -2610,9 +2619,8 @@ const ProjectsManager = () => {
         ? generateSlugFromTitle(currentProject.slug) 
         : generateSlugFromTitle(currentProject.title);
 
-      // Parse arrays safely
-      const galleryArray = currentProject.galleryText
-        ? currentProject.galleryText.split('\n').map((s: string) => s.trim()).filter(Boolean)
+      const galleryArray = Array.isArray(currentProject.gallery)
+        ? currentProject.gallery.filter((url: unknown) => typeof url === 'string' && url.trim())
         : [];
 
       const servicesArray = currentProject.servicesText
@@ -2631,6 +2639,9 @@ const ProjectsManager = () => {
         segment: currentProject.segment ? currentProject.segment.trim() : '',
         imageUrl: currentProject.imageUrl ? currentProject.imageUrl.trim() : '',
         gallery: galleryArray,
+        imageStoragePath: currentProject.imageStoragePath || '',
+        galleryStoragePaths: (currentProject.galleryStoragePaths || []).slice(0, galleryArray.length),
+        storageKey: currentProject.storageKey || currentProject.id || '',
         shortDescription: currentProject.shortDescription ? currentProject.shortDescription.trim() : '',
         fullDescription: currentProject.fullDescription ? currentProject.fullDescription.trim() : '',
         challenge: currentProject.challenge ? currentProject.challenge.trim() : '',
@@ -2662,6 +2673,92 @@ const ProjectsManager = () => {
       handleFirestoreError(error, OperationType.WRITE, `projects/${currentProject?.id || 'new'}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const reportUploadError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Não foi possível enviar a imagem. Tente novamente.';
+    console.error('Erro no upload de imagem do projeto:', error);
+    if (typeof window !== 'undefined' && (window as any).showAdminToast) {
+      (window as any).showAdminToast(message, 'error');
+    } else {
+      alert(message);
+    }
+  };
+
+  const handleCoverUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !currentProject) return;
+    const validationError = validateProjectImage(file);
+    if (validationError) return reportUploadError(new Error(validationError));
+
+    setCoverUploadProgress(0);
+    try {
+      const uploaded = await uploadProjectImage(file, currentProject.storageKey || currentProject.id || 'new-project', 'cover', setCoverUploadProgress);
+      const previousPath = currentProject.imageStoragePath;
+      setCurrentProject((project: any) => ({ ...project, imageUrl: uploaded.url, imageStoragePath: uploaded.path }));
+      if (previousPath && previousPath !== uploaded.path) {
+        deleteProjectImage(previousPath).catch(error => console.warn('Não foi possível remover a capa anterior:', error));
+      }
+    } catch (error) {
+      reportUploadError(error);
+    } finally {
+      setCoverUploadProgress(null);
+    }
+  };
+
+  const handleGalleryUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    if (!files.length || !currentProject) return;
+    const invalidFile = files.find(file => validateProjectImage(file));
+    if (invalidFile) return reportUploadError(new Error(validateProjectImage(invalidFile) || 'Arquivo inválido.'));
+
+    for (const file of files) {
+      const uploadId = `${file.name}-${Date.now()}-${Math.random()}`;
+      setGalleryUploadProgress(progress => ({ ...progress, [uploadId]: 0 }));
+      try {
+        const uploaded = await uploadProjectImage(file, currentProject.storageKey || currentProject.id || 'new-project', 'gallery', progress => {
+          setGalleryUploadProgress(state => ({ ...state, [uploadId]: progress }));
+        });
+        setCurrentProject((project: any) => ({
+          ...project,
+          gallery: [...(Array.isArray(project.gallery) ? project.gallery : []), uploaded.url],
+          galleryStoragePaths: [...(Array.isArray(project.galleryStoragePaths) ? project.galleryStoragePaths : []), uploaded.path],
+        }));
+      } catch (error) {
+        reportUploadError(error);
+      } finally {
+        setGalleryUploadProgress(state => {
+          const { [uploadId]: _removed, ...remaining } = state;
+          return remaining;
+        });
+      }
+    }
+  };
+
+  const removeCoverImage = async () => {
+    const path = currentProject?.imageStoragePath;
+    try {
+      if (path) await deleteProjectImage(path);
+      setCurrentProject((project: any) => ({ ...project, imageUrl: '', imageStoragePath: '' }));
+    } catch (error) {
+      reportUploadError(error);
+    }
+  };
+
+  const removeGalleryImage = async (index: number) => {
+    const path = currentProject?.galleryStoragePaths?.[index];
+    try {
+      if (path) await deleteProjectImage(path);
+      setCurrentProject((project: any) => ({
+        ...project,
+        gallery: (project.gallery || []).filter((_: string, imageIndex: number) => imageIndex !== index),
+        galleryStoragePaths: (project.galleryStoragePaths || []).filter((_: string, imageIndex: number) => imageIndex !== index),
+      }));
+    } catch (error) {
+      reportUploadError(error);
     }
   };
 
@@ -3143,14 +3240,21 @@ const ProjectsManager = () => {
 
             {/* Imagem de Capa */}
             <div className="col-span-2 sm:col-span-1">
-              <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-wider mb-1.5">URL da Imagem de Capa</label>
-              <input 
-                type="text"
-                placeholder="https://images.unsplash.com/..."
-                value={currentProject?.imageUrl || ''}
-                onChange={(e) => setCurrentProject({ ...currentProject, imageUrl: e.target.value })}
-                className="w-full bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-sm font-medium focus:border-[var(--color-accent)] outline-none"
-              />
+              <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-wider mb-1.5">Imagem de Capa</label>
+              <label className="flex items-center justify-center gap-2 w-full min-h-24 p-4 border-2 border-dashed border-[var(--color-border)] rounded-xl bg-[var(--color-surface-muted)] hover:border-[var(--color-accent)] cursor-pointer transition-colors text-sm font-bold">
+                {coverUploadProgress !== null ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                {coverUploadProgress !== null ? `Enviando ${coverUploadProgress}%` : 'Fazer upload da capa'}
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleCoverUpload} disabled={coverUploadProgress !== null} className="hidden" />
+              </label>
+              <p className="mt-1.5 text-[10px] text-[var(--color-ink)]/50">JPG, PNG ou WebP. Máximo de 10 MB.</p>
+              {currentProject?.imageUrl && (
+                <div className="mt-3 relative aspect-video overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]">
+                  <img src={currentProject.imageUrl} alt="Prévia da capa" className="w-full h-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+                  <button type="button" onClick={removeCoverImage} className="absolute top-2 right-2 p-2 rounded-lg bg-black/70 text-white hover:bg-[var(--color-error)]" title="Remover capa">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Descrição Curta */}
@@ -3223,16 +3327,31 @@ const ProjectsManager = () => {
               />
             </div>
 
-            {/* Galeria & Link Externo */}
+            {/* Galeria */}
             <div className="col-span-2">
-              <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-wider mb-1.5">Galeria de Imagens (Uma URL por linha)</label>
-              <textarea 
-                rows={3}
-                placeholder="https://..."
-                value={currentProject?.galleryText || ''}
-                onChange={(e) => setCurrentProject({ ...currentProject, galleryText: e.target.value })}
-                className="w-full bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-sm font-mono focus:border-[var(--color-accent)] outline-none"
-              />
+              <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-wider mb-1.5">Galeria de Imagens</label>
+              <label className="flex items-center justify-center gap-2 w-full min-h-20 p-4 border-2 border-dashed border-[var(--color-border)] rounded-xl bg-[var(--color-surface-muted)] hover:border-[var(--color-accent)] cursor-pointer transition-colors text-sm font-bold">
+                <Upload size={18} /> Fazer upload de imagens
+                <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleGalleryUpload} disabled={Object.keys(galleryUploadProgress).length > 0} className="hidden" />
+              </label>
+              <p className="mt-1.5 text-[10px] text-[var(--color-ink)]/50">Selecione uma ou mais imagens JPG, PNG ou WebP, até 10 MB cada.</p>
+              {Object.keys(galleryUploadProgress).length > 0 && (
+                <div className="mt-3 space-y-1.5 text-xs text-[var(--color-ink)]/70">
+                  {Object.entries(galleryUploadProgress).map(([id, progress]) => <div key={id}>Enviando imagem: {progress}%</div>)}
+                </div>
+              )}
+              {currentProject?.gallery?.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
+                  {currentProject.gallery.map((url: string, index: number) => (
+                    <div key={`${url}-${index}`} className="relative aspect-video overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]">
+                      <img src={url} alt={`Prévia da galeria ${index + 1}`} className="w-full h-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+                      <button type="button" onClick={() => removeGalleryImage(index)} className="absolute top-2 right-2 p-2 rounded-lg bg-black/70 text-white hover:bg-[var(--color-error)]" title="Remover imagem">
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="col-span-2 sm:col-span-1">
