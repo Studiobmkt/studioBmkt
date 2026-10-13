@@ -4013,6 +4013,8 @@ const BlogManager = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [coverUploadProgress, setCoverUploadProgress] = useState<number | null>(null);
   const [coverUploadError, setCoverUploadError] = useState('');
+  const [contentUploadProgress, setContentUploadProgress] = useState<number | null>(null);
+  const [contentUploadError, setContentUploadError] = useState('');
   const quillRef = useRef<ReactQuill>(null);
 
   useEffect(() => {
@@ -4031,6 +4033,8 @@ const BlogManager = () => {
     setIsSaving(true);
     
     try {
+      const storageKey = currentPost.storageKey || currentPost.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}-post`;
+      const content = await migrateInlineImages(currentPost.content || '', storageKey);
       // Improved slug generation
       const generateSlug = (text: string) => {
         return text
@@ -4045,6 +4049,8 @@ const BlogManager = () => {
 
       const data = {
         ...currentPost,
+        storageKey,
+        content,
         updatedAt: serverTimestamp(),
         createdAt: currentPost.id ? currentPost.createdAt : serverTimestamp(),
         tags: typeof currentPost.tags === 'string' ? currentPost.tags.split(',').map((t: string) => t.trim()) : currentPost.tags,
@@ -4071,6 +4077,35 @@ const BlogManager = () => {
     }
   };
 
+  const migrateInlineImages = async (content: string, storageKey: string) => {
+    const inlineSources = [...content.matchAll(/<img[^>]+src=["'](data:image\/[^"']+)["'][^>]*>/gi)].map(match => match[1]);
+    if (!inlineSources.length) return content;
+
+    setContentUploadError('');
+    setContentUploadProgress(0);
+    let migratedContent = content;
+    try {
+      for (let index = 0; index < inlineSources.length; index += 1) {
+        const source = inlineSources[index];
+        const response = await fetch(source);
+        const blob = await response.blob();
+        const extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+        const file = new File([blob], `imagem-do-artigo-${index + 1}.${extension}`, { type: blob.type || 'image/jpeg' });
+        const uploaded = await uploadBlogImage(file, storageKey, progress => {
+          setContentUploadProgress(Math.round(((index + progress / 100) / inlineSources.length) * 100));
+        });
+        migratedContent = migratedContent.replace(source, uploaded.url);
+      }
+      return migratedContent;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível enviar uma imagem do conteúdo.';
+      setContentUploadError(message);
+      throw new Error(message);
+    } finally {
+      setContentUploadProgress(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (postToDelete) {
       setIsSaving(true);
@@ -4092,21 +4127,30 @@ const BlogManager = () => {
     input.setAttribute('accept', 'image/*');
     input.click();
 
-    input.onchange = () => {
+    input.onchange = async () => {
       const file = input.files?.[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onload = () => {
+        const validationError = validateProjectImage(file);
+        if (validationError) return setContentUploadError(validationError);
+        const storageKey = currentPost?.storageKey || currentPost?.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}-post`;
+        setContentUploadError('');
+        setContentUploadProgress(0);
+        try {
+          const uploaded = await uploadBlogImage(file, storageKey, setContentUploadProgress);
           const quill = quillRef.current?.getEditor();
           if (quill) {
             const range = quill.getSelection();
-            quill.insertEmbed(range?.index || 0, 'image', reader.result);
+            quill.insertEmbed(range?.index || 0, 'image', uploaded.url);
           }
-        };
-        reader.readAsDataURL(file);
+          setCurrentPost((post: any) => ({ ...post, storageKey }));
+        } catch (error) {
+          setContentUploadError(error instanceof Error ? error.message : 'Não foi possível enviar a imagem.');
+        } finally {
+          setContentUploadProgress(null);
+        }
       }
     };
-  }, []);
+  }, [currentPost]);
 
   const handlePostCoverUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -4236,7 +4280,10 @@ const BlogManager = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-widest mb-2 sm:mb-3">Conteúdo</label>
+              <div className="flex items-center justify-between gap-3 mb-2 sm:mb-3">
+                <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-widest">Conteúdo</label>
+                {contentUploadProgress !== null && <span className="text-xs font-bold text-[var(--color-accent)]">Enviando imagem {contentUploadProgress}%</span>}
+              </div>
               <div className="quill-container bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-xl sm:rounded-2xl overflow-hidden min-h-[300px] sm:min-h-[500px] w-full max-w-full box-border">
                 <Quill 
                   ref={quillRef}
@@ -4247,6 +4294,7 @@ const BlogManager = () => {
                   className="h-[280px] sm:h-[450px] w-full max-w-full"
                 />
               </div>
+              {contentUploadError && <p className="mt-2 text-xs font-semibold text-red-600">{contentUploadError}</p>}
             </div>
           </div>
 
