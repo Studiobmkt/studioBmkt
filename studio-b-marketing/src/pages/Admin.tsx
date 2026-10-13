@@ -27,6 +27,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { supabase } from '../supabase';
 import { deleteProjectImage, uploadProjectImage, validateProjectImage } from '../lib/projectImageStorage';
 import { sendCustomAuthEmail } from '../lib/emailClient';
 import ThemeToggle from '../components/ThemeToggle';
@@ -322,8 +323,23 @@ const SetPasswordForm = ({ oobCode, onGoToLogin }: { oobCode: string | null; onG
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const isSupabaseInvite = Boolean(supabase) && window.location.pathname.includes('/admin/definir-senha');
 
   useEffect(() => {
+    if (isSupabaseInvite && supabase) {
+      const completeInvite = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user.email) {
+          setVerifiedEmail(session.user.email);
+        } else {
+          setOobCodeError('supabase/missing-session');
+        }
+        setVerifying(false);
+      };
+      completeInvite();
+      return;
+    }
+
     if (!oobCode) {
       setOobCodeError("auth/missing-action-code");
       setVerifying(false);
@@ -340,7 +356,7 @@ const SetPasswordForm = ({ oobCode, onGoToLogin }: { oobCode: string | null; onG
         setOobCodeError(err?.code || "auth/invalid-action-code");
         setVerifying(false);
       });
-  }, [oobCode]);
+  }, [oobCode, isSupabaseInvite]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -356,13 +372,19 @@ const SetPasswordForm = ({ oobCode, onGoToLogin }: { oobCode: string | null; onG
       return;
     }
 
-    if (!oobCode) {
+    if (!isSupabaseInvite && !oobCode) {
       setFormError("Código inválido. Solicite um novo link.");
       return;
     }
 
     setIsSubmitting(true);
     try {
+      if (isSupabaseInvite && supabase) {
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) throw error;
+        setIsSuccess(true);
+        return;
+      }
       await confirmPasswordReset(auth, oobCode, newPassword);
 
       if (verifiedEmail) {
