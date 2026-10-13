@@ -327,17 +327,18 @@ const SetPasswordForm = ({ oobCode, onGoToLogin }: { oobCode: string | null; onG
 
   useEffect(() => {
     if (isSupabaseInvite && supabase) {
-      const completeInvite = async () => {
-        const { data: { session } } = await supabase.auth.getSession();
+      const applyInviteSession = (session: Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']) => {
         if (session?.user.email) {
           setVerifiedEmail(session.user.email);
+          setOobCodeError(null);
         } else {
           setOobCodeError('supabase/missing-session');
         }
         setVerifying(false);
       };
-      completeInvite();
-      return;
+      supabase.auth.getSession().then(({ data: { session } }) => applyInviteSession(session));
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => applyInviteSession(session));
+      return () => subscription.unsubscribe();
     }
 
     if (!oobCode) {
