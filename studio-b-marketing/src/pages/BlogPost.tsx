@@ -120,8 +120,12 @@ export const BlogPost = () => {
     const extractedHeadings: { id: string; text: string }[] = [];
     let count = 0;
 
+    // Quill content imported from rich text can contain literal &nbsp; strings.
+    // Normalize them before rendering so paragraphs can wrap and the index shows readable titles.
+    const normalizedHtml = post.content.replace(/&(amp;)?nbsp;/gi, ' ');
+
     // Replace <h2> tags with custom formatted headers containing unique IDs
-    const modifiedHtml = post.content.replace(/<h2[^>]*>(.*?)<\/h2>/gi, (_match: string, innerText: string) => {
+    const modifiedHtml = normalizedHtml.replace(/<h2[^>]*>(.*?)<\/h2>/gi, (_match: string, innerText: string) => {
       count++;
       const sectionId = `secao-${count}`;
       const cleanText = innerText.replace(/<[^>]+>/g, '').trim();
@@ -308,8 +312,8 @@ export const BlogPost = () => {
             {/* Article Main Body Content */}
             <article className="editorial-article text-[#43210D] w-full max-w-[760px] [overflow-wrap:break-word]">
               <div 
-                className="prose prose-base sm:prose-lg max-w-none [overflow-wrap:break-word]
-                  prose-p:text-[#43210D]/90 prose-p:leading-relaxed prose-p:mb-6 prose-p:font-sans prose-p:text-base sm:prose-p:text-lg
+                className="prose prose-base sm:prose-lg max-w-none min-w-0 [overflow-wrap:anywhere]
+                  prose-p:text-[#43210D]/90 prose-p:leading-relaxed prose-p:mb-6 prose-p:font-sans prose-p:text-base sm:prose-p:text-lg prose-p:text-justify prose-p:[hyphens:auto]
                   prose-headings:font-heading prose-headings:font-extrabold prose-headings:text-[#43210D] 
                   prose-h3:text-lg sm:prose-h3:text-xl prose-h3:mt-8 prose-h3:mb-3
                   prose-strong:text-[#43210D] prose-strong:font-bold 

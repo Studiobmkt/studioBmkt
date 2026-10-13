@@ -22,7 +22,14 @@ const safeFileName = (fileName: string) =>
 const useSupabaseStorage = import.meta.env.VITE_DATA_BACKEND === 'supabase';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://nldpvfllhtgpodxuyabo.supabase.co';
 
-async function uploadThroughSupabase(file: File, projectKey: string, kind: 'cover' | 'gallery', onProgress: (progress: number) => void) {
+type ImageKind = 'cover' | 'gallery' | 'blog';
+
+const storagePath = (key: string, kind: ImageKind, fileName: string) =>
+  kind === 'blog'
+    ? `blog/${key}/cover/${makeId()}-${safeFileName(fileName)}`
+    : `projects/${key}/${kind}/${makeId()}-${safeFileName(fileName)}`;
+
+async function uploadThroughSupabase(file: File, projectKey: string, kind: ImageKind, onProgress: (progress: number) => void) {
   const user = auth.currentUser;
   if (!user) throw new Error('Sua sessão do admin expirou. Entre novamente para enviar imagens.');
 
@@ -55,7 +62,7 @@ export async function uploadProjectImage(
   const validationError = validateProjectImage(file);
   if (validationError) throw new Error(validationError);
 
-  const path = `projects/${projectKey}/${kind}/${makeId()}-${safeFileName(file.name)}`;
+  const path = storagePath(projectKey, kind, file.name);
 
   if (!useSupabaseStorage) {
     // The legacy Firebase bucket is retained for existing images. New uploads
@@ -74,6 +81,26 @@ export async function uploadProjectImage(
     throw new Error(`Não foi possível enviar a imagem: ${error.message}`);
   }
 
+  onProgress(100);
+  const { data } = client.storage.from('case-images').getPublicUrl(path);
+  return { path, url: data.publicUrl };
+}
+
+export async function uploadBlogImage(
+  file: File,
+  postKey: string,
+  onProgress: (progress: number) => void,
+): Promise<{ url: string; path: string }> {
+  const validationError = validateProjectImage(file);
+  if (validationError) throw new Error(validationError);
+
+  if (!useSupabaseStorage) return uploadThroughSupabase(file, postKey, 'blog', onProgress);
+
+  const path = storagePath(postKey, 'blog', file.name);
+  const client = requireSupabase();
+  onProgress(5);
+  const { error } = await client.storage.from('case-images').upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw new Error(`Não foi possível enviar a imagem: ${error.message}`);
   onProgress(100);
   const { data } = client.storage.from('case-images').getPublicUrl(path);
   return { path, url: data.publicUrl };

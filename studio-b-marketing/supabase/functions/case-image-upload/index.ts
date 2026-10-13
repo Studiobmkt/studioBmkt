@@ -62,7 +62,7 @@ Deno.serve(async (request) => {
 
     if (request.method === 'DELETE') {
       const { path } = await request.json()
-      if (typeof path !== 'string' || !path.startsWith('projects/')) return json({ error: 'Imagem inválida.' }, 400)
+      if (typeof path !== 'string' || (!path.startsWith('projects/') && !path.startsWith('blog/'))) return json({ error: 'Imagem inválida.' }, 400)
       const { error } = await supabase.storage.from('case-images').remove([path])
       if (error) throw new Error(error.message)
       return json({ ok: true })
@@ -75,10 +75,12 @@ Deno.serve(async (request) => {
     const kind = pathPart(form.get('kind'), 'Tipo')
     if (!(file instanceof File)) return json({ error: 'Selecione uma imagem.' }, 400)
     if (!ALLOWED_TYPES.has(file.type) || file.size > MAX_BYTES) return json({ error: 'Use JPG, PNG ou WebP de até 10 MB.' }, 400)
-    if (kind !== 'cover' && kind !== 'gallery') return json({ error: 'Tipo de imagem inválido.' }, 400)
+    if (kind !== 'cover' && kind !== 'gallery' && kind !== 'blog') return json({ error: 'Tipo de imagem inválido.' }, 400)
 
     const safeName = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-')
-    const path = `projects/${projectKey}/${kind}/${crypto.randomUUID()}-${safeName}`
+    const path = kind === 'blog'
+      ? `blog/${projectKey}/cover/${crypto.randomUUID()}-${safeName}`
+      : `projects/${projectKey}/${kind}/${crypto.randomUUID()}-${safeName}`
     const { error } = await supabase.storage.from('case-images').upload(path, file, { contentType: file.type, upsert: false })
     if (error) throw new Error(error.message)
     const { data } = supabase.storage.from('case-images').getPublicUrl(path)

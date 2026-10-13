@@ -28,7 +28,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { supabase } from '../supabase';
-import { deleteProjectImage, uploadProjectImage, validateProjectImage } from '../lib/projectImageStorage';
+import { deleteProjectImage, uploadBlogImage, uploadProjectImage, validateProjectImage } from '../lib/projectImageStorage';
 import { sendCustomAuthEmail } from '../lib/emailClient';
 import ThemeToggle from '../components/ThemeToggle';
 import { DEFAULT_MODULES } from '../components/ServicesBento';
@@ -4011,6 +4011,8 @@ const BlogManager = () => {
   const [postToDelete, setPostToDelete] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [coverUploadProgress, setCoverUploadProgress] = useState<number | null>(null);
+  const [coverUploadError, setCoverUploadError] = useState('');
   const quillRef = useRef<ReactQuill>(null);
 
   useEffect(() => {
@@ -4105,6 +4107,41 @@ const BlogManager = () => {
       }
     };
   }, []);
+
+  const handlePostCoverUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !currentPost) return;
+    const validationError = validateProjectImage(file);
+    if (validationError) return setCoverUploadError(validationError);
+
+    setCoverUploadError('');
+    setCoverUploadProgress(0);
+    try {
+      const storageKey = currentPost.storageKey || currentPost.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}-post`;
+      const uploaded = await uploadBlogImage(file, storageKey, setCoverUploadProgress);
+      const previousPath = currentPost.imageStoragePath;
+      setCurrentPost((post: any) => ({ ...post, storageKey, imageUrl: uploaded.url, imageStoragePath: uploaded.path }));
+      if (previousPath && previousPath !== uploaded.path) {
+        deleteProjectImage(previousPath).catch(error => console.warn('Não foi possível remover a capa anterior:', error));
+      }
+    } catch (error) {
+      setCoverUploadError(error instanceof Error ? error.message : 'Não foi possível enviar a imagem.');
+    } finally {
+      setCoverUploadProgress(null);
+    }
+  };
+
+  const removePostCover = async () => {
+    const path = currentPost?.imageStoragePath;
+    setCoverUploadError('');
+    try {
+      if (path) await deleteProjectImage(path);
+      setCurrentPost((post: any) => ({ ...post, imageUrl: '', imageStoragePath: '' }));
+    } catch (error) {
+      setCoverUploadError(error instanceof Error ? error.message : 'Não foi possível remover a imagem.');
+    }
+  };
 
   const videoHandler = useCallback(() => {
     const input = document.createElement('input');
@@ -4219,11 +4256,11 @@ const BlogManager = () => {
               {/* Imagem de Capa */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-widest">URL da Imagem de Capa</label>
+                  <label className="block text-xs font-bold text-[var(--color-ink)]/50 uppercase tracking-widest">Imagem de Capa</label>
                   {currentPost?.imageUrl && (
                     <button
                       type="button"
-                      onClick={() => setCurrentPost({ ...currentPost, imageUrl: '' })}
+                      onClick={removePostCover}
                       className="text-xs font-bold text-red-500 hover:text-red-600 flex items-center gap-1 transition-colors cursor-pointer"
                       title="Remover imagem"
                     >
@@ -4232,13 +4269,13 @@ const BlogManager = () => {
                   )}
                 </div>
                 <div className="space-y-3">
-                  <input 
-                    type="url"
-                    placeholder="https://exemplo.com/imagem.jpg"
-                    value={currentPost?.imageUrl || ''}
-                    onChange={(e) => setCurrentPost({ ...currentPost, imageUrl: e.target.value })}
-                    className="w-full bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-xl px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm focus:border-[var(--color-accent)] outline-none box-border text-[var(--color-ink)]"
-                  />
+                  <label className="flex items-center justify-center gap-2 w-full min-h-24 p-4 border-2 border-dashed border-[var(--color-border)] rounded-xl bg-[var(--color-surface-muted)] hover:border-[var(--color-accent)] cursor-pointer transition-colors text-sm font-bold">
+                    {coverUploadProgress !== null ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                    {coverUploadProgress !== null ? `Enviando ${coverUploadProgress}%` : 'Fazer upload da capa'}
+                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePostCoverUpload} disabled={coverUploadProgress !== null} className="hidden" />
+                  </label>
+                  <p className="text-[11px] text-[var(--color-ink)]/50">JPG, PNG ou WebP. Máximo de 10 MB.</p>
+                  {coverUploadError && <p className="text-xs font-semibold text-red-600">{coverUploadError}</p>}
 
                   {/* Pré-visualização da Imagem */}
                   {currentPost?.imageUrl ? (
@@ -4253,7 +4290,7 @@ const BlogManager = () => {
                           if (parent && !parent.querySelector('.img-error-msg')) {
                             const errDiv = document.createElement('div');
                             errDiv.className = 'img-error-msg text-xs text-[var(--color-ink)]/50 font-bold p-4 text-center';
-                            errDiv.innerText = 'URL da imagem inválida ou inacessível';
+                            errDiv.innerText = 'Não foi possível carregar a imagem.';
                             parent.appendChild(errDiv);
                           }
                         }}
@@ -4262,7 +4299,7 @@ const BlogManager = () => {
                   ) : (
                     <div className="flex flex-col items-center justify-center aspect-video rounded-xl sm:rounded-2xl border-2 border-dashed border-[var(--color-border)] p-4 text-center bg-[var(--color-surface-muted)]/50">
                       <ImageIcon size={28} className="text-[var(--color-ink)]/20 mb-2 sm:w-8 sm:h-8" />
-                      <span className="text-xs font-bold text-[var(--color-ink)]/40">Cole uma URL de imagem válida acima</span>
+                      <span className="text-xs font-bold text-[var(--color-ink)]/40">Envie uma imagem de capa</span>
                     </div>
                   )}
                 </div>
@@ -4369,7 +4406,8 @@ const BlogManager = () => {
         </div>
         <button 
           onClick={() => {
-            setCurrentPost({ title: '', description: '', content: '', imageUrl: '', tags: '', published: false, publishedAt: new Date().toISOString() });
+            setCoverUploadError('');
+            setCurrentPost({ title: '', description: '', content: '', imageUrl: '', imageStoragePath: '', storageKey: globalThis.crypto?.randomUUID?.() || `${Date.now()}-post`, tags: '', published: false, publishedAt: new Date().toISOString() });
             setView('editor');
           }}
           className="w-full sm:w-auto bg-accent-gradient text-[var(--color-on-accent)] px-5 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:scale-105 transition-all text-xs sm:text-sm shadow-md shrink-0 cursor-pointer"
@@ -4406,7 +4444,8 @@ const BlogManager = () => {
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--color-border)]/60">
               <button 
                 onClick={() => {
-                  setCurrentPost({ ...post, tags: post.tags?.join(', ') || '' });
+                  setCoverUploadError('');
+                  setCurrentPost({ ...post, storageKey: post.storageKey || post.id, imageStoragePath: post.imageStoragePath || '', tags: post.tags?.join(', ') || '' });
                   setView('editor');
                 }}
                 className="px-3 py-1.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl font-bold text-xs flex items-center gap-1.5 text-[var(--color-ink)] cursor-pointer"
@@ -4464,7 +4503,8 @@ const BlogManager = () => {
                   <div className="flex justify-end gap-2">
                     <button 
                       onClick={() => {
-                        setCurrentPost({ ...post, tags: post.tags?.join(', ') || '' });
+                        setCoverUploadError('');
+                        setCurrentPost({ ...post, storageKey: post.storageKey || post.id, imageStoragePath: post.imageStoragePath || '', tags: post.tags?.join(', ') || '' });
                         setView('editor');
                       }}
                       className="p-2 text-[var(--color-ink)]/40 hover:text-[var(--color-accent)] transition-colors cursor-pointer"
