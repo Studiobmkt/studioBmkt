@@ -122,7 +122,9 @@ export const BlogPost = () => {
 
     // Quill content imported from rich text can contain literal &nbsp; strings.
     // Normalize them before rendering so paragraphs can wrap and the index shows readable titles.
-    const normalizedHtml = post.content.replace(/&(amp;)?nbsp;/gi, ' ');
+    // Some imported posts were encoded more than once (&amp;amp;nbsp;).
+    // Decode every repetition so neither the body nor the article index can show the entity text.
+    const normalizedHtml = post.content.replace(/(?:&amp;)+nbsp;|&nbsp;|&#160;|&#xA0;/gi, ' ');
 
     // Replace <h2> tags with custom formatted headers containing unique IDs
     const modifiedHtml = normalizedHtml.replace(/<h2[^>]*>(.*?)<\/h2>/gi, (_match: string, innerText: string) => {
